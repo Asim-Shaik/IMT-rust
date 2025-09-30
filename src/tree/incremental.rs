@@ -7,37 +7,27 @@ use crate::utils::{hash_bytes, hash_pair, Hash};
 /// Default depth for the Merkle tree
 pub const DEFAULT_TREE_DEPTH: usize = 20;
 
-/// Serializable tree that stores only the leaves at each level
+/// Serializable tree that stores only the bottom-most leaf nodes
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SerializableTree {
-    /// Leaves at each level: level_leaves[0] = bottom leaves, level_leaves[depth-1] = root level
-    pub level_leaves: Vec<Vec<Hash>>,
-    /// Number of leaves at the bottom level
-    pub leaf_count: usize,
+    /// Only the leaf nodes at the bottom level (no predefined capacity)
+    pub leaves: Vec<Hash>,
 }
 
 impl SerializableTree {
-    /// Create a new serializable tree with the given depth
-    pub fn new(depth: usize) -> Self {
-        Self {
-            level_leaves: vec![Vec::new(); depth],
-            leaf_count: 0,
-        }
+    /// Create a new serializable tree (no predefined capacity)
+    pub fn new() -> Self {
+        Self { leaves: Vec::new() }
     }
 
-    /// Get the depth of the tree
-    pub fn depth(&self) -> usize {
-        self.level_leaves.len()
-    }
-
-    /// Get the number of leaves at the bottom level
+    /// Get the number of leaves
     pub fn len(&self) -> usize {
-        self.leaf_count
+        self.leaves.len()
     }
 
     /// Check if the tree is empty
     pub fn is_empty(&self) -> bool {
-        self.leaf_count == 0
+        self.leaves.is_empty()
     }
 }
 
@@ -69,16 +59,16 @@ impl IncrementalMerkleTree {
         let zero_hashes = Self::compute_zero_hashes(depth);
 
         Self {
-            serializable: SerializableTree::new(depth),
+            serializable: SerializableTree::new(),
             depth,
             capacity,
             zero_hashes,
         }
     }
 
-    /// Create a tree from an existing serializable tree
+    /// Create a tree from an existing serializable tree (assumes DEFAULT_TREE_DEPTH)
     pub fn from_serializable(serializable: SerializableTree) -> Self {
-        let depth = serializable.depth();
+        let depth = DEFAULT_TREE_DEPTH;
         let capacity = 1usize << depth;
         let zero_hashes = Self::compute_zero_hashes(depth);
 
@@ -139,23 +129,7 @@ impl IncrementalMerkleTree {
 
     /// Get the hash of a leaf at a specific index (for internal use)
     pub fn get_leaf_hash(&self, index: usize) -> Option<Hash> {
-        if index < self.serializable.leaf_count {
-            self.serializable.level_leaves[0].get(index).copied()
-        } else {
-            None
-        }
-    }
-
-    /// Get the hash of a node at a specific level and index
-    fn get_node_hash(&self, level: usize, index: usize) -> Hash {
-        if level < self.serializable.level_leaves.len() {
-            if let Some(&hash) = self.serializable.level_leaves[level].get(index) {
-                return hash;
-            }
-        }
-
-        // Return zero hash if node doesn't exist
-        self.zero_hashes[level]
+        self.serializable.leaves.get(index).copied()
     }
 
     /// Set a leaf hash directly (for internal use during loading)
@@ -164,30 +138,21 @@ impl IncrementalMerkleTree {
             return Err(IndexerError::IndexOutOfBounds);
         }
 
-        // Ensure we have enough space in level 0
-        while self.serializable.level_leaves[0].len() <= index {
-            self.serializable.level_leaves[0].push(self.zero_hashes[0]);
+        // Ensure we have enough space in the leaves vector
+        while self.serializable.leaves.len() <= index {
+            self.serializable.leaves.push(self.zero_hashes[0]);
         }
 
-        self.serializable.level_leaves[0][index] = hash;
-
-        // Update leaf count if necessary
-        if index >= self.serializable.leaf_count {
-            self.serializable.leaf_count = index + 1;
-        }
-
-        // Update all levels above
-        self.update_levels_after_append(index, hash);
-
+        self.serializable.leaves[index] = hash;
         Ok(())
     }
 
-    /// Set the leaf count directly (for internal use during loading)
+    /// Set the leaf count directly (for internal use during loading) - now a no-op since we use Vec::len()
     pub fn set_next_index(&mut self, leaf_count: usize) -> IndexerResult<()> {
-        if leaf_count > self.capacity {
-            return Err(IndexerError::IndexOutOfBounds);
-        }
-        self.serializable.leaf_count = leaf_count;
+        // Ensure the leaves vector has the right size
+        self.serializable
+            .leaves
+            .resize(leaf_count, self.zero_hashes[0]);
         Ok(())
     }
 
@@ -198,64 +163,24 @@ impl IncrementalMerkleTree {
         }
 
         let leaf_hash = hash_bytes(leaf_data);
-        let index = self.serializable.leaf_count;
+        let index = self.serializable.leaves.len();
 
-        // Add the leaf to level 0
-        self.serializable.level_leaves[0].push(leaf_hash);
-        self.serializable.leaf_count += 1;
-
-        // Update all levels above by recomputing the affected nodes
-        self.update_levels_after_append(index, leaf_hash);
+        // Add the leaf to the bottom level (no predefined capacity)
+        self.serializable.leaves.push(leaf_hash);
 
         Ok(index)
     }
 
-    /// Update all levels after appending a new leaf
-    fn update_levels_after_append(&mut self, leaf_index: usize, _leaf_hash: Hash) {
-        // Just call the general update function
-        self.update_all_affected_levels(leaf_index);
-    }
-
     /// Update an existing leaf
     pub fn update(&mut self, index: usize, leaf_data: &[u8]) -> IndexerResult<()> {
-        if index >= self.serializable.leaf_count {
+        if index >= self.serializable.leaves.len() {
             return Err(IndexerError::IndexOutOfBounds);
         }
 
         let leaf_hash = hash_bytes(leaf_data);
-        self.serializable.level_leaves[0][index] = leaf_hash;
-
-        // Update all affected levels above
-        self.update_all_affected_levels(index);
+        self.serializable.leaves[index] = leaf_hash;
 
         Ok(())
-    }
-
-    /// Update all levels affected by a change at the given leaf index
-    fn update_all_affected_levels(&mut self, leaf_index: usize) {
-        let mut current_index = leaf_index;
-
-        // Update each level from bottom to top
-        for level in 1..self.depth {
-            let parent_index = current_index / 2;
-
-            // Ensure we have enough space at this level
-            while self.serializable.level_leaves[level].len() <= parent_index {
-                self.serializable.level_leaves[level].push(self.zero_hashes[level]);
-            }
-
-            // Get left and right child hashes
-            let left_child_index = parent_index * 2;
-            let right_child_index = parent_index * 2 + 1;
-
-            let left_child = self.get_node_hash(level - 1, left_child_index);
-            let right_child = self.get_node_hash(level - 1, right_child_index);
-
-            let parent_hash = hash_pair(&left_child, &right_child);
-            self.serializable.level_leaves[level][parent_index] = parent_hash;
-
-            current_index = parent_index;
-        }
     }
 
     /// Insert a commitment into the tree
@@ -264,33 +189,92 @@ impl IncrementalMerkleTree {
         self.append(&commitment_data)
     }
 
-    /// Get the current root hash
+    /// Get the current root hash (computed using incremental tree properties)
     pub fn root(&self) -> Hash {
-        if self.depth > 0 {
-            self.get_node_hash(self.depth - 1, 0)
-        } else {
-            self.zero_hashes[0]
+        if self.serializable.leaves.is_empty() {
+            return self.zero_hashes[self.depth - 1];
         }
+
+        // Compute root by building the tree level by level using incremental properties
+        let mut current_level = self.serializable.leaves.clone();
+        let mut level = 0;
+
+        while current_level.len() > 1 || level < self.depth - 1 {
+            let mut next_level = Vec::new();
+            let mut i = 0;
+
+            while i < current_level.len() || next_level.is_empty() {
+                let left = if i < current_level.len() {
+                    current_level[i]
+                } else {
+                    self.zero_hashes[level]
+                };
+
+                let right = if i + 1 < current_level.len() {
+                    current_level[i + 1]
+                } else {
+                    self.zero_hashes[level]
+                };
+
+                next_level.push(hash_pair(&left, &right));
+                i += 2;
+            }
+
+            current_level = next_level;
+            level += 1;
+
+            if level >= self.depth - 1 {
+                break;
+            }
+        }
+
+        current_level[0]
     }
 
-    /// Generate a Merkle proof for a leaf at the given index
+    /// Generate a Merkle proof for a leaf at the given index using incremental tree properties
     pub fn prove(&self, leaf_index: usize) -> IndexerResult<MerkleProof> {
-        if leaf_index >= self.serializable.leaf_count {
+        if leaf_index >= self.serializable.leaves.len() {
             return Err(IndexerError::LeafNotAppended);
         }
 
         // Get the leaf hash
-        let leaf = self.get_node_hash(0, leaf_index);
+        let leaf = self.serializable.leaves[leaf_index];
 
-        let mut siblings = Vec::with_capacity(self.depth - 1); // depth - 1 because we don't include root level
+        let mut siblings = Vec::with_capacity(self.depth - 1);
+        let mut current_level = self.serializable.leaves.clone();
         let mut idx = leaf_index;
+        let mut level = 0;
 
-        // Generate siblings for levels 0 to depth-2 (we don't need a sibling for the root level)
-        for level in 0..(self.depth - 1) {
+        // Generate siblings by computing each level using incremental properties
+        while level < self.depth - 1 {
+            // Find sibling at current level
             let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
-            let sibling_hash = self.get_node_hash(level, sibling_idx);
+
+            let sibling_hash = if sibling_idx < current_level.len() {
+                current_level[sibling_idx]
+            } else {
+                self.zero_hashes[level]
+            };
+
             siblings.push(sibling_hash);
+
+            // Compute next level
+            let mut next_level = Vec::new();
+            let mut i = 0;
+            while i < current_level.len() {
+                let left = current_level[i];
+                let right = if i + 1 < current_level.len() {
+                    current_level[i + 1]
+                } else {
+                    self.zero_hashes[level]
+                };
+                next_level.push(hash_pair(&left, &right));
+                i += 2;
+            }
+
+            current_level = next_level;
             idx /= 2;
+            level += 1;
         }
 
         Ok(MerkleProof::new(leaf_index, leaf, siblings))
