@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::errors::{IndexerError, IndexerResult};
 use crate::storage::{PageCache, StorageConfig, TreeMetadata, WalEntry, WriteAheadLog};
-use crate::tree::{IncrementalMerkleTree, MerkleProof, TREE_DEPTH};
+use crate::tree::{IncrementalMerkleTree, MerkleProof, DEFAULT_TREE_DEPTH};
 use crate::utils::{hash_bytes, Hash};
 
 // Storage constants
@@ -18,21 +18,21 @@ const LEAVES_PER_PAGE: usize = PAGE_SIZE / (LEAF_SIZE + 1); // +1 for existence 
 pub struct PersistentMerkleTree {
     config: StorageConfig,
     metadata: Arc<RwLock<TreeMetadata>>,
-    
+
     // File handles
     data_file: Arc<Mutex<File>>,
     metadata_file: Arc<Mutex<File>>,
     wal: Option<WriteAheadLog>,
-    
+
     // Memory-mapped region for hot data
     mmap: Option<Arc<Mutex<MmapMut>>>,
-    
+
     // Cache for frequently accessed pages
     cache: Arc<Mutex<PageCache>>,
-    
+
     // Zero hashes (computed once)
     zero_hashes: Vec<Hash>,
-    
+
     // In-memory tree for root computation
     memory_tree: Arc<RwLock<IncrementalMerkleTree>>,
 }
@@ -111,18 +111,18 @@ impl PersistentMerkleTree {
 
     /// Compute zero hashes for all levels
     fn compute_zero_hashes() -> Vec<Hash> {
-        let mut zero_hashes = Vec::with_capacity(TREE_DEPTH + 1);
-        
+        let mut zero_hashes = Vec::with_capacity(DEFAULT_TREE_DEPTH + 1);
+
         // Level 0: hash of single zero byte
         let base_zero = hash_bytes(&[0u8]);
         zero_hashes.push(base_zero);
-        
+
         // Higher levels: zero_{i+1} = hash_pair(zero_i, zero_i)
-        for i in 0..TREE_DEPTH {
+        for i in 0..DEFAULT_TREE_DEPTH {
             let next = crate::utils::hash_pair(&zero_hashes[i], &zero_hashes[i]);
             zero_hashes.push(next);
         }
-        
+
         zero_hashes
     }
 
@@ -137,8 +137,8 @@ impl PersistentMerkleTree {
 
         if buffer.is_empty() {
             // Create new metadata
-            let root_hash = zero_hashes[TREE_DEPTH];
-            Ok(TreeMetadata::new(TREE_DEPTH, 0, root_hash))
+            let root_hash = zero_hashes[DEFAULT_TREE_DEPTH];
+            Ok(TreeMetadata::new(DEFAULT_TREE_DEPTH, 0, root_hash))
         } else {
             // Load existing metadata
             let metadata: TreeMetadata = bincode::deserialize(&buffer)
@@ -153,11 +153,11 @@ impl PersistentMerkleTree {
         data_file: &Arc<Mutex<File>>,
     ) -> IndexerResult<Option<Arc<Mutex<MmapMut>>>> {
         let mut file = data_file.lock();
-        
+
         // Ensure file has minimum size for memory mapping (1MB)
         let min_size = 1024 * 1024;
         let current_size = file.metadata()?.len();
-        
+
         if current_size < min_size {
             file.set_len(min_size)?;
         }
@@ -180,17 +180,17 @@ impl PersistentMerkleTree {
 
         // Load existing leaves into memory tree
         let mut memory_tree = self.memory_tree.write();
-        
+
         // Set the next index first
         memory_tree.set_next_index(next_index)?;
-        
+
         // Load all existing leaf hashes
         for i in 0..next_index {
             if let Some(leaf_hash) = self.read_leaf_from_disk(i)? {
                 memory_tree.set_leaf_hash(i, leaf_hash)?;
             }
         }
-        
+
         drop(memory_tree);
 
         Ok(())
@@ -199,14 +199,14 @@ impl PersistentMerkleTree {
     /// Append a new leaf to the tree
     pub fn append(&mut self, leaf_data: &[u8]) -> IndexerResult<usize> {
         let leaf_hash = hash_bytes(leaf_data);
-        
+
         let mut metadata = self.metadata.write();
-        if metadata.next_index >= (1 << TREE_DEPTH) {
+        if metadata.next_index >= (1 << DEFAULT_TREE_DEPTH) {
             return Err(IndexerError::TreeFull);
         }
 
         let index = metadata.next_index;
-        
+
         // Write to WAL first if enabled
         if let Some(wal) = &self.wal {
             let entry = WalEntry::new(index, leaf_hash);
@@ -227,7 +227,7 @@ impl PersistentMerkleTree {
         metadata.next_index = index + 1;
         metadata.root_hash = self.compute_root_hash();
         self.save_metadata(&metadata)?;
-        
+
         Ok(index)
     }
 
@@ -276,11 +276,11 @@ impl PersistentMerkleTree {
                 let mut mmap = mmap.lock();
                 let page_start = page_id * PAGE_SIZE;
                 let leaf_start = page_start + page_offset * (LEAF_SIZE + 1);
-                
+
                 // Write existence flag and hash
                 mmap[leaf_start] = 1;
                 mmap[leaf_start + 1..leaf_start + 1 + LEAF_SIZE].copy_from_slice(leaf_hash);
-                
+
                 return Ok(());
             }
         }
@@ -297,12 +297,12 @@ impl PersistentMerkleTree {
         {
             let mut page_data = page.write();
             let leaf_start = page_offset * (LEAF_SIZE + 1);
-            
+
             // Ensure page is large enough
             if page_data.len() < leaf_start + LEAF_SIZE + 1 {
                 page_data.resize(PAGE_SIZE, 0);
             }
-            
+
             // Write existence flag and hash
             page_data[leaf_start] = 1;
             page_data[leaf_start + 1..leaf_start + 1 + LEAF_SIZE].copy_from_slice(leaf_hash);
@@ -326,7 +326,7 @@ impl PersistentMerkleTree {
                 let mmap = mmap.lock();
                 let page_start = page_id * PAGE_SIZE;
                 let leaf_start = page_start + page_offset * (LEAF_SIZE + 1);
-                
+
                 if leaf_start + LEAF_SIZE + 1 <= mmap.len() && mmap[leaf_start] == 1 {
                     let mut hash = [0u8; 32];
                     hash.copy_from_slice(&mmap[leaf_start + 1..leaf_start + 1 + LEAF_SIZE]);
@@ -348,7 +348,7 @@ impl PersistentMerkleTree {
 
         let page_data = page.read();
         let leaf_start = page_offset * (LEAF_SIZE + 1);
-        
+
         if leaf_start + LEAF_SIZE + 1 <= page_data.len() && page_data[leaf_start] == 1 {
             let mut hash = [0u8; 32];
             hash.copy_from_slice(&page_data[leaf_start + 1..leaf_start + 1 + LEAF_SIZE]);
@@ -362,29 +362,25 @@ impl PersistentMerkleTree {
     fn load_page_from_disk(&self, page_id: usize) -> IndexerResult<Vec<u8>> {
         let mut file = self.data_file.lock();
         let offset = page_id * PAGE_SIZE;
-        
+
         file.seek(SeekFrom::Start(offset as u64))?;
         let mut buffer = vec![0u8; PAGE_SIZE];
         let bytes_read = file.read(&mut buffer)?;
-        
+
         buffer.truncate(bytes_read);
         Ok(buffer)
     }
 
     /// Write a page to disk
-    fn write_page_to_disk(
-        &self,
-        page_id: usize,
-        page: &Arc<RwLock<Vec<u8>>>,
-    ) -> IndexerResult<()> {
+    fn write_page_to_disk(&self, page_id: usize, page: &Arc<RwLock<Vec<u8>>>) -> IndexerResult<()> {
         let mut file = self.data_file.lock();
         let offset = page_id * PAGE_SIZE;
-        
+
         file.seek(SeekFrom::Start(offset as u64))?;
         let page_data = page.read();
         file.write_all(&page_data)?;
         file.flush()?;
-        
+
         Ok(())
     }
 
@@ -402,12 +398,12 @@ impl PersistentMerkleTree {
         let mut file = self.metadata_file.lock();
         file.seek(SeekFrom::Start(0))?;
         file.set_len(0)?;
-        
+
         let serialized = bincode::serialize(&updated_metadata)
             .map_err(|e| IndexerError::SerializationError(e.to_string()))?;
         file.write_all(&serialized)?;
         file.flush()?;
-        
+
         Ok(())
     }
 
@@ -459,7 +455,7 @@ impl PersistentMerkleTree {
             let mut file = self.data_file.lock();
             file.flush()?;
         }
-        
+
         {
             let mut file = self.metadata_file.lock();
             file.flush()?;

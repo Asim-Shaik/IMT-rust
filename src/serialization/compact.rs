@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 
 use crate::errors::{IndexerError, IndexerResult};
 use crate::serialization::{SerializationFormat, SerializationOptions};
-use crate::tree::IncrementalMerkleTree;
+use crate::tree::{IncrementalMerkleTree, SerializableTree};
 use crate::utils::Hash;
 
 /// Compact representation of a Merkle tree that only stores non-empty leaves
@@ -50,17 +50,18 @@ pub fn serialize_tree_optimized(
     tree: &IncrementalMerkleTree,
     options: &SerializationOptions,
 ) -> IndexerResult<Vec<u8>> {
-    // For now, use the standard tree serialization
-    // In a full implementation, we'd use CompactTree
+    // Directly serialize the serializable part of the tree
+    let serializable_tree = &tree.serializable;
+    
     let serialized =
         match options.format {
-            SerializationFormat::Bincode => bincode::serialize(tree)
+            SerializationFormat::Bincode => bincode::serialize(serializable_tree)
                 .map_err(|e| IndexerError::SerializationError(e.to_string()))?,
-            SerializationFormat::MessagePack => rmp_serde::to_vec(tree)
+            SerializationFormat::MessagePack => rmp_serde::to_vec(serializable_tree)
                 .map_err(|e| IndexerError::SerializationError(e.to_string()))?,
             SerializationFormat::Postcard => {
                 let mut buffer = vec![0u8; 4 * 1024 * 1024]; // 4MB buffer
-                let slice = postcard::to_slice(tree, &mut buffer)
+                let slice = postcard::to_slice(serializable_tree, &mut buffer)
                     .map_err(|e| IndexerError::SerializationError(e.to_string()))?;
                 slice.to_vec()
             }
@@ -89,7 +90,7 @@ pub fn deserialize_tree_optimized(
         data.to_vec()
     };
 
-    let compact_tree: CompactTree = match options.format {
+    let serializable_tree: SerializableTree = match options.format {
         SerializationFormat::Bincode => bincode::deserialize(&decompressed)
             .map_err(|e| IndexerError::SerializationError(e.to_string()))?,
         SerializationFormat::MessagePack => rmp_serde::from_slice(&decompressed)
@@ -98,5 +99,5 @@ pub fn deserialize_tree_optimized(
             .map_err(|e| IndexerError::SerializationError(e.to_string()))?,
     };
 
-    compact_tree.to_tree()
+    Ok(IncrementalMerkleTree::from_serializable(serializable_tree))
 }

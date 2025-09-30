@@ -147,23 +147,22 @@ fn run_serialization_demo() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Test delta serialization
-    println!("\n🔄 Testing delta serialization:");
-    let mut tree1 = IncrementalMerkleTree::new();
-    tree1.append(b"original1")?;
-    tree1.append(b"original2")?;
+    // Test basic serialization
+    println!("\n🔄 Testing tree serialization:");
+    let mut test_tree = IncrementalMerkleTree::new();
+    test_tree.append(b"test1")?;
+    test_tree.append(b"test2")?;
+    test_tree.append(b"test3")?;
 
-    let mut tree2 = tree1.clone();
-    tree2.append(b"new1")?;
-    tree2.append(b"new2")?;
-    tree2.update(0, b"updated_original1")?;
+    let original_root = test_tree.root();
+    let serialized = bincode::serialize(&test_tree)?;
+    let deserialized: IncrementalMerkleTree = bincode::deserialize(&serialized)?;
 
-    let delta = tree1.create_delta(&tree2);
+    println!("   Original root: {}", hex::encode(original_root));
+    println!("   Deserialized root: {}", hex::encode(deserialized.root()));
     println!(
-        "   Delta: {} new leaves, {} updated leaves, {} total changes",
-        delta.new_leaves.len(),
-        delta.updated_leaves.len(),
-        delta.change_count()
+        "   Serialization successful: {}",
+        original_root == deserialized.root()
     );
 
     Ok(())

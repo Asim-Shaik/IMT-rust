@@ -166,29 +166,6 @@ fn test_tree_serialization() {
     assert!(proof.verify(&original_root));
 }
 
-#[test]
-fn test_tree_delta_operations() {
-    let mut tree1 = IncrementalMerkleTree::new();
-    tree1.append(b"original1").unwrap();
-    tree1.append(b"original2").unwrap();
-
-    let mut tree2 = tree1.clone();
-    tree2.append(b"new1").unwrap();
-    tree2.append(b"new2").unwrap();
-    tree2.update(0, b"updated1").unwrap();
-
-    let delta = tree1.create_delta(&tree2);
-    assert_eq!(delta.new_leaves.len(), 2);
-    assert_eq!(delta.updated_leaves.len(), 1);
-    assert_eq!(delta.change_count(), 3);
-    assert!(!delta.is_empty());
-
-    // Apply delta and verify
-    let mut tree1_updated = tree1.clone();
-    tree1_updated.apply_delta(&delta).unwrap();
-    assert_eq!(tree1_updated.root(), tree2.root());
-    assert_eq!(tree1_updated.len(), tree2.len());
-}
 
 #[test]
 fn test_error_handling() {

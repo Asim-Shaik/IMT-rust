@@ -4,25 +4,60 @@ use crate::errors::{IndexerError, IndexerResult};
 use crate::tree::{Commitment, MerkleProof};
 use crate::utils::{hash_bytes, hash_pair, Hash};
 
-/// Fixed depth for the Merkle tree
-pub const TREE_DEPTH: usize = 20;
+/// Default depth for the Merkle tree
+pub const DEFAULT_TREE_DEPTH: usize = 20;
 
-/// In-memory incremental Merkle tree implementation
+/// Serializable tree that stores only the leaves at each level
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SerializableTree {
+    /// Leaves at each level: level_leaves[0] = bottom leaves, level_leaves[depth-1] = root level
+    pub level_leaves: Vec<Vec<Hash>>,
+    /// Number of leaves at the bottom level
+    pub leaf_count: usize,
+}
+
+impl SerializableTree {
+    /// Create a new serializable tree with the given depth
+    pub fn new(depth: usize) -> Self {
+        Self {
+            level_leaves: vec![Vec::new(); depth],
+            leaf_count: 0,
+        }
+    }
+
+    /// Get the depth of the tree
+    pub fn depth(&self) -> usize {
+        self.level_leaves.len()
+    }
+
+    /// Get the number of leaves at the bottom level
+    pub fn len(&self) -> usize {
+        self.leaf_count
+    }
+
+    /// Check if the tree is empty
+    pub fn is_empty(&self) -> bool {
+        self.leaf_count == 0
+    }
+}
+
+/// Full incremental Merkle tree implementation
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IncrementalMerkleTree {
+    /// The serializable part of the tree
+    pub serializable: SerializableTree,
+    /// Tree depth (configurable)
     depth: usize,
+    /// Maximum capacity (2^depth)
     capacity: usize,
-    /// Leaves stored as optional hashes (None = empty slot)
-    leaves: Vec<Option<Hash>>,
-    next_index: usize,
     /// Precomputed zero hashes for each level
     zero_hashes: Vec<Hash>,
 }
 
 impl IncrementalMerkleTree {
-    /// Create a new incremental Merkle tree with fixed depth
+    /// Create a new incremental Merkle tree with default depth
     pub fn new() -> Self {
-        Self::with_depth(TREE_DEPTH)
+        Self::with_depth(DEFAULT_TREE_DEPTH)
     }
 
     /// Create a new incremental Merkle tree with specified depth
@@ -34,10 +69,23 @@ impl IncrementalMerkleTree {
         let zero_hashes = Self::compute_zero_hashes(depth);
 
         Self {
+            serializable: SerializableTree::new(depth),
             depth,
             capacity,
-            leaves: vec![None; capacity],
-            next_index: 0,
+            zero_hashes,
+        }
+    }
+
+    /// Create a tree from an existing serializable tree
+    pub fn from_serializable(serializable: SerializableTree) -> Self {
+        let depth = serializable.depth();
+        let capacity = 1usize << depth;
+        let zero_hashes = Self::compute_zero_hashes(depth);
+
+        Self {
+            serializable,
+            depth,
+            capacity,
             zero_hashes,
         }
     }
@@ -66,17 +114,17 @@ impl IncrementalMerkleTree {
 
     /// Get the current number of leaves in the tree
     pub fn len(&self) -> usize {
-        self.next_index
+        self.serializable.len()
     }
 
     /// Check if the tree is empty
     pub fn is_empty(&self) -> bool {
-        self.next_index == 0
+        self.serializable.is_empty()
     }
 
     /// Check if the tree is at full capacity
     pub fn is_full(&self) -> bool {
-        self.next_index >= self.capacity
+        self.serializable.len() >= self.capacity
     }
 
     /// Get the tree depth
@@ -91,11 +139,23 @@ impl IncrementalMerkleTree {
 
     /// Get the hash of a leaf at a specific index (for internal use)
     pub fn get_leaf_hash(&self, index: usize) -> Option<Hash> {
-        if index < self.next_index {
-            self.leaves[index]
+        if index < self.serializable.leaf_count {
+            self.serializable.level_leaves[0].get(index).copied()
         } else {
             None
         }
+    }
+
+    /// Get the hash of a node at a specific level and index
+    fn get_node_hash(&self, level: usize, index: usize) -> Hash {
+        if level < self.serializable.level_leaves.len() {
+            if let Some(&hash) = self.serializable.level_leaves[level].get(index) {
+                return hash;
+            }
+        }
+
+        // Return zero hash if node doesn't exist
+        self.zero_hashes[level]
     }
 
     /// Set a leaf hash directly (for internal use during loading)
@@ -103,23 +163,31 @@ impl IncrementalMerkleTree {
         if index >= self.capacity {
             return Err(IndexerError::IndexOutOfBounds);
         }
-        
-        self.leaves[index] = Some(hash);
-        
-        // Update next_index if necessary
-        if index >= self.next_index {
-            self.next_index = index + 1;
+
+        // Ensure we have enough space in level 0
+        while self.serializable.level_leaves[0].len() <= index {
+            self.serializable.level_leaves[0].push(self.zero_hashes[0]);
         }
-        
+
+        self.serializable.level_leaves[0][index] = hash;
+
+        // Update leaf count if necessary
+        if index >= self.serializable.leaf_count {
+            self.serializable.leaf_count = index + 1;
+        }
+
+        // Update all levels above
+        self.update_levels_after_append(index, hash);
+
         Ok(())
     }
 
-    /// Set the next index directly (for internal use during loading)
-    pub fn set_next_index(&mut self, next_index: usize) -> IndexerResult<()> {
-        if next_index > self.capacity {
+    /// Set the leaf count directly (for internal use during loading)
+    pub fn set_next_index(&mut self, leaf_count: usize) -> IndexerResult<()> {
+        if leaf_count > self.capacity {
             return Err(IndexerError::IndexOutOfBounds);
         }
-        self.next_index = next_index;
+        self.serializable.leaf_count = leaf_count;
         Ok(())
     }
 
@@ -130,21 +198,64 @@ impl IncrementalMerkleTree {
         }
 
         let leaf_hash = hash_bytes(leaf_data);
-        let idx = self.next_index;
-        self.leaves[idx] = Some(leaf_hash);
-        self.next_index += 1;
-        Ok(idx)
+        let index = self.serializable.leaf_count;
+
+        // Add the leaf to level 0
+        self.serializable.level_leaves[0].push(leaf_hash);
+        self.serializable.leaf_count += 1;
+
+        // Update all levels above by recomputing the affected nodes
+        self.update_levels_after_append(index, leaf_hash);
+
+        Ok(index)
+    }
+
+    /// Update all levels after appending a new leaf
+    fn update_levels_after_append(&mut self, leaf_index: usize, _leaf_hash: Hash) {
+        // Just call the general update function
+        self.update_all_affected_levels(leaf_index);
     }
 
     /// Update an existing leaf
     pub fn update(&mut self, index: usize, leaf_data: &[u8]) -> IndexerResult<()> {
-        if index >= self.next_index {
+        if index >= self.serializable.leaf_count {
             return Err(IndexerError::IndexOutOfBounds);
         }
 
         let leaf_hash = hash_bytes(leaf_data);
-        self.leaves[index] = Some(leaf_hash);
+        self.serializable.level_leaves[0][index] = leaf_hash;
+
+        // Update all affected levels above
+        self.update_all_affected_levels(index);
+
         Ok(())
+    }
+
+    /// Update all levels affected by a change at the given leaf index
+    fn update_all_affected_levels(&mut self, leaf_index: usize) {
+        let mut current_index = leaf_index;
+
+        // Update each level from bottom to top
+        for level in 1..self.depth {
+            let parent_index = current_index / 2;
+
+            // Ensure we have enough space at this level
+            while self.serializable.level_leaves[level].len() <= parent_index {
+                self.serializable.level_leaves[level].push(self.zero_hashes[level]);
+            }
+
+            // Get left and right child hashes
+            let left_child_index = parent_index * 2;
+            let right_child_index = parent_index * 2 + 1;
+
+            let left_child = self.get_node_hash(level - 1, left_child_index);
+            let right_child = self.get_node_hash(level - 1, right_child_index);
+
+            let parent_hash = hash_pair(&left_child, &right_child);
+            self.serializable.level_leaves[level][parent_index] = parent_hash;
+
+            current_index = parent_index;
+        }
     }
 
     /// Insert a commitment into the tree
@@ -153,146 +264,42 @@ impl IncrementalMerkleTree {
         self.append(&commitment_data)
     }
 
-    /// Compute the hash of a node at a given level and index
-    fn node_hash_at(&self, level: usize, index: usize) -> Hash {
-        if level == 0 {
-            // Leaf level
-            if index < self.capacity {
-                if let Some(hash) = self.leaves[index] {
-                    return hash;
-                }
-            }
-            // Empty leaf uses zero hash
-            return self.zero_hashes[0];
-        }
-
-        // Internal node: compute from children
-        let left = self.node_hash_at(level - 1, index * 2);
-        let right = self.node_hash_at(level - 1, index * 2 + 1);
-        hash_pair(&left, &right)
-    }
-
     /// Get the current root hash
     pub fn root(&self) -> Hash {
-        self.node_hash_at(self.depth, 0)
+        if self.depth > 0 {
+            self.get_node_hash(self.depth - 1, 0)
+        } else {
+            self.zero_hashes[0]
+        }
     }
 
     /// Generate a Merkle proof for a leaf at the given index
     pub fn prove(&self, leaf_index: usize) -> IndexerResult<MerkleProof> {
-        if leaf_index >= self.next_index {
+        if leaf_index >= self.serializable.leaf_count {
             return Err(IndexerError::LeafNotAppended);
         }
 
         // Get the leaf hash
-        let leaf = self.leaves[leaf_index]
-            .unwrap_or(self.zero_hashes[0]);
+        let leaf = self.get_node_hash(0, leaf_index);
 
-        let mut siblings = Vec::with_capacity(self.depth);
+        let mut siblings = Vec::with_capacity(self.depth - 1); // depth - 1 because we don't include root level
         let mut idx = leaf_index;
 
-        for level in 0..self.depth {
+        // Generate siblings for levels 0 to depth-2 (we don't need a sibling for the root level)
+        for level in 0..(self.depth - 1) {
             let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
-            
-            let sibling_hash = if level == 0 {
-                // Leaf level sibling
-                if sibling_idx < self.capacity {
-                    self.leaves[sibling_idx].unwrap_or(self.zero_hashes[0])
-                } else {
-                    self.zero_hashes[0]
-                }
-            } else {
-                // Internal node sibling
-                let max_idx_at_level = (1usize << (self.depth - level)) - 1;
-                if sibling_idx <= max_idx_at_level {
-                    self.node_hash_at(level, sibling_idx)
-                } else {
-                    self.zero_hashes[level]
-                }
-            };
-
+            let sibling_hash = self.get_node_hash(level, sibling_idx);
             siblings.push(sibling_hash);
             idx /= 2;
         }
 
         Ok(MerkleProof::new(leaf_index, leaf, siblings))
     }
-
-    /// Create a delta showing the differences between this tree and another
-    pub fn create_delta(&self, other: &IncrementalMerkleTree) -> TreeDelta {
-        let mut new_leaves = Vec::new();
-        let mut updated_leaves = Vec::new();
-
-        // Find new leaves (beyond our current next_index)
-        for i in self.next_index..other.next_index {
-            if let Some(hash) = other.leaves[i] {
-                new_leaves.push((i, hash));
-            }
-        }
-
-        // Find updated leaves (within our current range)
-        for i in 0..self.next_index.min(other.next_index) {
-            if self.leaves[i] != other.leaves[i] {
-                if let Some(hash) = other.leaves[i] {
-                    updated_leaves.push((i, hash));
-                }
-            }
-        }
-
-        TreeDelta {
-            base_next_index: self.next_index,
-            new_leaves,
-            updated_leaves,
-        }
-    }
-
-    /// Apply a delta to this tree
-    pub fn apply_delta(&mut self, delta: &TreeDelta) -> IndexerResult<()> {
-        // Apply updated leaves
-        for (index, hash) in &delta.updated_leaves {
-            if *index >= self.capacity {
-                return Err(IndexerError::IndexOutOfBounds);
-            }
-            self.leaves[*index] = Some(*hash);
-        }
-
-        // Apply new leaves
-        for (index, hash) in &delta.new_leaves {
-            if *index >= self.capacity {
-                return Err(IndexerError::IndexOutOfBounds);
-            }
-            self.leaves[*index] = Some(*hash);
-            if *index >= self.next_index {
-                self.next_index = *index + 1;
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl Default for IncrementalMerkleTree {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Represents changes between two tree states
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TreeDelta {
-    pub base_next_index: usize,
-    pub new_leaves: Vec<(usize, Hash)>,
-    pub updated_leaves: Vec<(usize, Hash)>,
-}
-
-impl TreeDelta {
-    /// Check if this delta is empty (no changes)
-    pub fn is_empty(&self) -> bool {
-        self.new_leaves.is_empty() && self.updated_leaves.is_empty()
-    }
-
-    /// Get the total number of changes in this delta
-    pub fn change_count(&self) -> usize {
-        self.new_leaves.len() + self.updated_leaves.len()
     }
 }
 
@@ -303,16 +310,16 @@ mod tests {
     #[test]
     fn test_basic_operations() {
         let mut tree = IncrementalMerkleTree::new();
-        
+
         assert_eq!(tree.len(), 0);
         assert!(tree.is_empty());
         assert!(!tree.is_full());
-        assert_eq!(tree.capacity(), 1 << TREE_DEPTH);
+        assert_eq!(tree.capacity(), 1 << DEFAULT_TREE_DEPTH);
 
         // Test append
         let idx1 = tree.append(b"test1").unwrap();
         let idx2 = tree.append(b"test2").unwrap();
-        
+
         assert_eq!(idx1, 0);
         assert_eq!(idx2, 1);
         assert_eq!(tree.len(), 2);
@@ -320,7 +327,7 @@ mod tests {
 
         // Test update
         tree.update(0, b"updated_test1").unwrap();
-        
+
         // Test proof generation and verification
         let proof = tree.prove(0).unwrap();
         assert!(proof.verify(&tree.root()));
@@ -329,37 +336,13 @@ mod tests {
     #[test]
     fn test_commitment_operations() {
         let mut tree = IncrementalMerkleTree::new();
-        
-        let commitment = Commitment::new(
-            1,
-            0,
-            [1u8; 32],
-            [2u8; 32],
-            [3u8; 32],
-        );
+
+        let commitment = Commitment::new(1, 0, [1u8; 32], [2u8; 32], [3u8; 32]);
 
         let idx = tree.insert_commitment(&commitment).unwrap();
         assert_eq!(idx, 0);
 
         let proof = tree.prove(idx).unwrap();
         assert!(proof.verify(&tree.root()));
-    }
-
-    #[test]
-    fn test_delta_operations() {
-        let mut tree1 = IncrementalMerkleTree::new();
-        tree1.append(b"original1").unwrap();
-        tree1.append(b"original2").unwrap();
-
-        let mut tree2 = tree1.clone();
-        tree2.append(b"new1").unwrap();
-        tree2.update(0, b"updated1").unwrap();
-
-        let delta = tree1.create_delta(&tree2);
-        assert_eq!(delta.new_leaves.len(), 1);
-        assert_eq!(delta.updated_leaves.len(), 1);
-
-        tree1.apply_delta(&delta).unwrap();
-        assert_eq!(tree1.root(), tree2.root());
     }
 }
