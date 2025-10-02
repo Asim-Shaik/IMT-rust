@@ -1,6 +1,6 @@
 use arcium_indexer::{
-    PersistentMerkleTree, StorageConfig, IncrementalMerkleTree, Commitment,
-    serialization::{SerializationOptions, SerializationFormat},
+    serialization::{SerializationFormat, SerializationOptions},
+    Commitment, IncrementalMerkleTree, PersistentMerkleTree, StorageConfig,
 };
 use tempfile::TempDir;
 
@@ -12,7 +12,7 @@ fn test_persistent_tree_basic_operations() {
         .with_wal(true);
 
     let mut tree = PersistentMerkleTree::new(config).unwrap();
-    
+
     // Test basic operations
     assert_eq!(tree.len(), 0);
     assert!(tree.is_empty());
@@ -34,7 +34,7 @@ fn test_persistent_tree_basic_operations() {
     // Test proofs
     let proof = tree.prove(1).unwrap();
     let root = tree.root();
-    
+
     assert!(proof.verify(&root));
 
     // Sync to disk
@@ -57,10 +57,10 @@ fn test_persistent_tree_persistence() {
         tree.append(b"persistent1").unwrap();
         tree.append(b"persistent2").unwrap();
         tree.append(b"persistent3").unwrap();
-        
+
         original_root = tree.root();
         original_len = tree.len();
-        
+
         tree.sync().unwrap();
     }
 
@@ -78,8 +78,8 @@ fn test_persistent_tree_persistence() {
 
 #[test]
 fn test_in_memory_tree_operations() {
-    let mut tree = IncrementalMerkleTree::new();
-    
+    let mut tree = IncrementalMerkleTree::new(20);
+
     // Test basic operations
     assert_eq!(tree.len(), 0);
     assert!(tree.is_empty());
@@ -88,7 +88,7 @@ fn test_in_memory_tree_operations() {
     // Test append
     let idx1 = tree.append(b"test1").unwrap();
     let idx2 = tree.append(b"test2").unwrap();
-    
+
     assert_eq!(idx1, 0);
     assert_eq!(idx2, 1);
     assert_eq!(tree.len(), 2);
@@ -96,26 +96,20 @@ fn test_in_memory_tree_operations() {
 
     // Test update
     tree.update(0, b"updated_test1").unwrap();
-    
+
     // Test proof generation and verification
     let proof = tree.prove(0).unwrap();
     assert!(proof.verify(&tree.root()));
-    
+
     let proof2 = tree.prove(1).unwrap();
     assert!(proof2.verify(&tree.root()));
 }
 
 #[test]
 fn test_commitment_operations() {
-    let mut tree = IncrementalMerkleTree::new();
-    
-    let commitment = Commitment::new(
-        1,
-        42,
-        [1u8; 32],
-        [2u8; 32],
-        [3u8; 32],
-    );
+    let mut tree = IncrementalMerkleTree::new(20);
+
+    let commitment = Commitment::new(1, 42, [1u8; 32], [2u8; 32], [3u8; 32]);
 
     let index = tree.insert_commitment(&commitment).unwrap();
     assert_eq!(index, 0);
@@ -126,18 +120,12 @@ fn test_commitment_operations() {
 
 #[test]
 fn test_commitment_serialization() {
-    let commitment = Commitment::new(
-        1,
-        42,
-        [1u8; 32],
-        [2u8; 32],
-        [3u8; 32],
-    );
+    let commitment = Commitment::new(1, 42, [1u8; 32], [2u8; 32], [3u8; 32]);
 
     // Test binary serialization
     let bytes = commitment.to_bytes();
     let parsed = Commitment::from_bytes(&bytes).unwrap();
-    
+
     assert_eq!(commitment.version, parsed.version);
     assert_eq!(commitment.commitment_index, parsed.commitment_index);
     assert_eq!(commitment.hash, parsed.hash);
@@ -147,7 +135,7 @@ fn test_commitment_serialization() {
 
 #[test]
 fn test_tree_serialization() {
-    let mut tree = IncrementalMerkleTree::new();
+    let mut tree = IncrementalMerkleTree::new(20);
     tree.append(b"test1").unwrap();
     tree.append(b"test2").unwrap();
     tree.append(b"test3").unwrap();
@@ -166,22 +154,21 @@ fn test_tree_serialization() {
     assert!(proof.verify(&original_root));
 }
 
-
 #[test]
 fn test_error_handling() {
-    let mut tree = IncrementalMerkleTree::new();
-    
+    let mut tree = IncrementalMerkleTree::new(20);
+
     // Test updating non-existent leaf
     assert!(tree.update(100, b"nonexistent").is_err());
-    
+
     // Test proving non-existent leaf
     assert!(tree.prove(100).is_err());
-    
+
     // Add one leaf and test boundary conditions
     tree.append(b"test").unwrap();
     assert!(tree.update(1, b"out_of_bounds").is_err());
     assert!(tree.prove(1).is_err());
-    
+
     // Valid operations should still work
     assert!(tree.update(0, b"valid_update").is_ok());
     assert!(tree.prove(0).is_ok());
@@ -189,13 +176,13 @@ fn test_error_handling() {
 
 #[test]
 fn test_zero_hashes() {
-    let tree = IncrementalMerkleTree::new();
-    
+    let tree = IncrementalMerkleTree::new(20);
+
     // Should have zero hashes for all levels
     for level in 0..=tree.depth() {
         assert!(tree.zero_hash(level).is_some());
     }
-    
+
     // Beyond max level should return None
     assert!(tree.zero_hash(tree.depth() + 1).is_none());
 }

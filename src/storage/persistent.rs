@@ -86,7 +86,7 @@ impl PersistentMerkleTree {
         let cache = Arc::new(Mutex::new(PageCache::new(cache_pages)));
 
         // Create in-memory tree for root computation
-        let memory_tree = Arc::new(RwLock::new(IncrementalMerkleTree::new()));
+        let memory_tree = Arc::new(RwLock::new(IncrementalMerkleTree::new(20)));
 
         // Setup memory mapping for hot data
         let mmap = Self::setup_memory_mapping(&data_file)?;
@@ -152,7 +152,7 @@ impl PersistentMerkleTree {
     fn setup_memory_mapping(
         data_file: &Arc<Mutex<File>>,
     ) -> IndexerResult<Option<Arc<Mutex<MmapMut>>>> {
-        let mut file = data_file.lock();
+        let file = data_file.lock();
 
         // Ensure file has minimum size for memory mapping (1MB)
         let min_size = 1024 * 1024;

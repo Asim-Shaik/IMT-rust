@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn test_basic_tree_operations() {
-        let mut tree = IncrementalMerkleTree::new();
+        let mut tree = IncrementalMerkleTree::new(20);
 
         // Test basic operations
         assert_eq!(tree.len(), 0);
@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn test_commitment_operations() {
-        let mut tree = IncrementalMerkleTree::new();
+        let mut tree = IncrementalMerkleTree::new(20);
 
         let commitment = Commitment::new(1, 42, [1u8; 32], [2u8; 32], [3u8; 32]);
 
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn test_legacy_api_compatibility() {
-        let mut tree = IncrementalMerkleTree::new();
+        let mut tree = IncrementalMerkleTree::new(20);
 
         // Test legacy commitment parsing
         let commitment_data = Commitment::new(1, 0, [1u8; 32], [2u8; 32], [3u8; 32]).to_bytes();

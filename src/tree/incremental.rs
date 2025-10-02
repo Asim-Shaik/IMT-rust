@@ -4,9 +4,6 @@ use crate::errors::{IndexerError, IndexerResult};
 use crate::tree::{Commitment, MerkleProof};
 use crate::utils::{hash_bytes, hash_pair, Hash};
 
-/// Default depth for the Merkle tree
-pub const DEFAULT_TREE_DEPTH: usize = 20;
-
 /// Serializable tree that stores only the bottom-most leaf nodes
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SerializableTree {
@@ -45,9 +42,9 @@ pub struct IncrementalMerkleTree {
 }
 
 impl IncrementalMerkleTree {
-    /// Create a new incremental Merkle tree with default depth
-    pub fn new() -> Self {
-        Self::with_depth(DEFAULT_TREE_DEPTH)
+    /// Create a new incremental Merkle tree with specified depth
+    pub fn new(depth: usize) -> Self {
+        Self::with_depth(depth)
     }
 
     /// Create a new incremental Merkle tree with specified depth
@@ -66,9 +63,8 @@ impl IncrementalMerkleTree {
         }
     }
 
-    /// Create a tree from an existing serializable tree (assumes DEFAULT_TREE_DEPTH)
-    pub fn from_serializable(serializable: SerializableTree) -> Self {
-        let depth = DEFAULT_TREE_DEPTH;
+    /// Create a tree from an existing serializable tree with specified depth
+    pub fn from_serializable(serializable: SerializableTree, depth: usize) -> Self {
         let capacity = 1usize << depth;
         let zero_hashes = Self::compute_zero_hashes(depth);
 
@@ -243,12 +239,11 @@ impl IncrementalMerkleTree {
         let mut siblings = Vec::with_capacity(self.depth - 1);
         let mut current_level = self.serializable.leaves.clone();
         let mut idx = leaf_index;
-        let mut level = 0;
 
         // Generate siblings by computing each level using incremental properties
-        while level < self.depth - 1 {
+        for level in 0..self.depth - 1 {
             // Find sibling at current level
-            let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
+            let sibling_idx = idx ^ 1;
 
             let sibling_hash = if sibling_idx < current_level.len() {
                 current_level[sibling_idx]
@@ -260,8 +255,7 @@ impl IncrementalMerkleTree {
 
             // Compute next level
             let mut next_level = Vec::new();
-            let mut i = 0;
-            while i < current_level.len() {
+            for i in (0..current_level.len()).step_by(2) {
                 let left = current_level[i];
                 let right = if i + 1 < current_level.len() {
                     current_level[i + 1]
@@ -269,12 +263,10 @@ impl IncrementalMerkleTree {
                     self.zero_hashes[level]
                 };
                 next_level.push(hash_pair(&left, &right));
-                i += 2;
             }
 
             current_level = next_level;
             idx /= 2;
-            level += 1;
         }
 
         Ok(MerkleProof::new(leaf_index, leaf, siblings))
@@ -283,7 +275,7 @@ impl IncrementalMerkleTree {
 
 impl Default for IncrementalMerkleTree {
     fn default() -> Self {
-        Self::new()
+        Self::new(20) // Use 20 as default depth
     }
 }
 
@@ -293,12 +285,12 @@ mod tests {
 
     #[test]
     fn test_basic_operations() {
-        let mut tree = IncrementalMerkleTree::new();
+        let mut tree = IncrementalMerkleTree::new(20);
 
         assert_eq!(tree.len(), 0);
         assert!(tree.is_empty());
         assert!(!tree.is_full());
-        assert_eq!(tree.capacity(), 1 << DEFAULT_TREE_DEPTH);
+        assert_eq!(tree.capacity(), 1 << 20);
 
         // Test append
         let idx1 = tree.append(b"test1").unwrap();
@@ -319,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_commitment_operations() {
-        let mut tree = IncrementalMerkleTree::new();
+        let mut tree = IncrementalMerkleTree::new(20);
 
         let commitment = Commitment::new(1, 0, [1u8; 32], [2u8; 32], [3u8; 32]);
 

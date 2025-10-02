@@ -306,7 +306,7 @@ impl PersistentMerkleTree {
 use arcium_indexer::IncrementalMerkleTree;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut tree = IncrementalMerkleTree::new();
+    let mut tree = IncrementalMerkleTree::new(20);
 
     // Add some data
     let idx1 = tree.append(b"first commitment")?;

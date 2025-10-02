@@ -31,7 +31,7 @@ impl From<&IncrementalMerkleTree> for CompactTree {
 impl CompactTree {
     /// Convert back to a full incremental Merkle tree
     pub fn to_tree(&self) -> IndexerResult<IncrementalMerkleTree> {
-        let mut tree = IncrementalMerkleTree::new();
+        let mut tree = IncrementalMerkleTree::new(20);
 
         // Restore the leaves directly using the new API
         for (index, hash) in &self.non_empty_leaves {
@@ -52,20 +52,19 @@ pub fn serialize_tree_optimized(
 ) -> IndexerResult<Vec<u8>> {
     // Directly serialize the serializable part of the tree
     let serializable_tree = &tree.serializable;
-    
-    let serialized =
-        match options.format {
-            SerializationFormat::Bincode => bincode::serialize(serializable_tree)
-                .map_err(|e| IndexerError::SerializationError(e.to_string()))?,
-            SerializationFormat::MessagePack => rmp_serde::to_vec(serializable_tree)
-                .map_err(|e| IndexerError::SerializationError(e.to_string()))?,
-            SerializationFormat::Postcard => {
-                let mut buffer = vec![0u8; 4 * 1024 * 1024]; // 4MB buffer
-                let slice = postcard::to_slice(serializable_tree, &mut buffer)
-                    .map_err(|e| IndexerError::SerializationError(e.to_string()))?;
-                slice.to_vec()
-            }
-        };
+
+    let serialized = match options.format {
+        SerializationFormat::Bincode => bincode::serialize(serializable_tree)
+            .map_err(|e| IndexerError::SerializationError(e.to_string()))?,
+        SerializationFormat::MessagePack => rmp_serde::to_vec(serializable_tree)
+            .map_err(|e| IndexerError::SerializationError(e.to_string()))?,
+        SerializationFormat::Postcard => {
+            let mut buffer = vec![0u8; 4 * 1024 * 1024]; // 4MB buffer
+            let slice = postcard::to_slice(serializable_tree, &mut buffer)
+                .map_err(|e| IndexerError::SerializationError(e.to_string()))?;
+            slice.to_vec()
+        }
+    };
 
     if options.compress {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::new(options.compression_level));
@@ -99,5 +98,8 @@ pub fn deserialize_tree_optimized(
             .map_err(|e| IndexerError::SerializationError(e.to_string()))?,
     };
 
-    Ok(IncrementalMerkleTree::from_serializable(serializable_tree))
+    Ok(IncrementalMerkleTree::from_serializable(
+        serializable_tree,
+        20,
+    ))
 }

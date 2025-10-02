@@ -111,7 +111,7 @@ fn run_serialization_demo() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "-".repeat(20));
 
     // Create a test tree
-    let mut tree = IncrementalMerkleTree::new();
+    let mut tree = IncrementalMerkleTree::new(20);
     let test_data = [
         "commitment_1",
         "commitment_2",
@@ -149,7 +149,7 @@ fn run_serialization_demo() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test basic serialization
     println!("\n🔄 Testing tree serialization:");
-    let mut test_tree = IncrementalMerkleTree::new();
+    let mut test_tree = IncrementalMerkleTree::new(20);
     test_tree.append(b"test1")?;
     test_tree.append(b"test2")?;
     test_tree.append(b"test3")?;
