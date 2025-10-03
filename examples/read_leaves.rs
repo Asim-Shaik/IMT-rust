@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_file = if args.len() > 1 {
         &args[1]
     } else {
-        "demo_data/leaves.dat"
+        "sparse_tree_demo/sparse_tree.dat"
     };
 
     println!("🔍 Reading leaves.dat file");

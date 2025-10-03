@@ -1,4 +1,4 @@
-use crate::utils::{hash_pair, Hash};
+use crate::utils::{internal::hash_pair, Hash};
 
 /// Merkle proof for a leaf in the tree
 #[derive(Debug, Clone)]

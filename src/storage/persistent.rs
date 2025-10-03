@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::errors::{IndexerError, IndexerResult};
 use crate::storage::{PageCache, StorageConfig, TreeMetadata, WalEntry, WriteAheadLog};
 use crate::tree::{IncrementalMerkleTree, MerkleProof, DEFAULT_TREE_DEPTH};
-use crate::utils::{hash_bytes, Hash};
+use crate::utils::{internal::hash_bytes, Hash};
 
 // Storage constants
 const LEAF_SIZE: usize = 32; // Hash size
@@ -119,7 +119,7 @@ impl PersistentMerkleTree {
 
         // Higher levels: zero_{i+1} = hash_pair(zero_i, zero_i)
         for i in 0..DEFAULT_TREE_DEPTH {
-            let next = crate::utils::hash_pair(&zero_hashes[i], &zero_hashes[i]);
+            let next = crate::utils::internal::hash_pair(&zero_hashes[i], &zero_hashes[i]);
             zero_hashes.push(next);
         }
 

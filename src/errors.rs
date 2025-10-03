@@ -19,6 +19,8 @@ pub enum IndexerError {
     InvalidData(String),
     /// Storage operation failed
     StorageError(String),
+    /// Feature not yet implemented
+    NotImplemented(String),
 }
 
 impl fmt::Display for IndexerError {
@@ -32,6 +34,7 @@ impl fmt::Display for IndexerError {
             IndexerError::ChecksumError => write!(f, "Checksum verification failed"),
             IndexerError::InvalidData(msg) => write!(f, "Invalid data: {}", msg),
             IndexerError::StorageError(msg) => write!(f, "Storage error: {}", msg),
+            IndexerError::NotImplemented(msg) => write!(f, "Feature not implemented: {}", msg),
         }
     }
 }
@@ -53,6 +56,12 @@ impl From<bincode::Error> for IndexerError {
 impl From<Box<dyn std::error::Error>> for IndexerError {
     fn from(err: Box<dyn std::error::Error>) -> Self {
         IndexerError::StorageError(err.to_string())
+    }
+}
+
+impl From<hex::FromHexError> for IndexerError {
+    fn from(err: hex::FromHexError) -> Self {
+        IndexerError::InvalidData(format!("Hex decoding error: {}", err))
     }
 }
 

@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::{IndexerError, IndexerResult};
 use crate::tree::{Commitment, MerkleProof};
-use crate::utils::{hash_bytes, hash_pair, Hash};
+use crate::utils::{
+    internal::{hash_bytes, hash_pair},
+    Hash,
+};
 
 /// Serializable tree that stores only the bottom-most leaf nodes
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -275,7 +278,7 @@ impl IncrementalMerkleTree {
 
 impl Default for IncrementalMerkleTree {
     fn default() -> Self {
-        Self::new(20) // Use 20 as default depth
+        Self::new(crate::tree::DEFAULT_TREE_DEPTH)
     }
 }
 
@@ -285,12 +288,12 @@ mod tests {
 
     #[test]
     fn test_basic_operations() {
-        let mut tree = IncrementalMerkleTree::new(20);
+        let mut tree = IncrementalMerkleTree::new(crate::tree::DEFAULT_TREE_DEPTH);
 
         assert_eq!(tree.len(), 0);
         assert!(tree.is_empty());
         assert!(!tree.is_full());
-        assert_eq!(tree.capacity(), 1 << 20);
+        assert_eq!(tree.capacity(), 1 << crate::tree::DEFAULT_TREE_DEPTH);
 
         // Test append
         let idx1 = tree.append(b"test1").unwrap();
@@ -311,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_commitment_operations() {
-        let mut tree = IncrementalMerkleTree::new(20);
+        let mut tree = IncrementalMerkleTree::new(crate::tree::DEFAULT_TREE_DEPTH);
 
         let commitment = Commitment::new(1, 0, [1u8; 32], [2u8; 32], [3u8; 32]);
 

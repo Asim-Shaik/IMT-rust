@@ -14,7 +14,7 @@ pub mod utils;
 pub use config::IndexerConfig;
 pub use errors::{IndexerError, IndexerResult};
 pub use storage::{PersistentMerkleTree, StorageConfig};
-pub use tree::{Commitment, IncrementalMerkleTree, MerkleProof};
+pub use tree::{Commitment, IncrementalMerkleTree, MerkleProof, SparseMerkleTree, AuthenticatedKV};
 pub use utils::Hash;
 
 // Legacy API compatibility functions
