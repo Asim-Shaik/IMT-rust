@@ -1,5 +1,5 @@
 [package]
-name = "arcium-indexer"
+name = "umbra-indexer"
 version = "0.1.0"
 edition = "2021"
 description = "High-performance persistent Merkle tree implementation for blockchain indexing"
@@ -13,7 +13,7 @@ name = "demo"
 path = "src/main.rs"
 
 [lib]
-name = "arcium_indexer"
+name = "umbra_indexer"
 path = "src/lib.rs"
 
 [dependencies]

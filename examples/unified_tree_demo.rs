@@ -1,4 +1,4 @@
-use arcium_indexer::{
+use umbra_indexer::{
     errors::IndexerResult,
     storage::{create_tree_storage, TreeStorage, TreeType},
     tree::Commitment,

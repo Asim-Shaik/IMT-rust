@@ -42,29 +42,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "862ed96ca487e809f1c8e5a8447f6ee2cf102f846893800b20cebdf541fc6bbd"
 
 [[package]]
-name = "arcium-indexer"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "bitvec",
- "crc32fast",
- "criterion",
- "digest",
- "flate2",
- "hex",
- "memmap2",
- "parking_lot",
- "postcard",
- "proptest",
- "rand 0.8.5",
- "rmp-serde",
- "serde",
- "sha2",
- "solana-poseidon",
- "tempfile",
-]
-
-[[package]]
 name = "ark-bn254"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1268,6 +1245,29 @@ name = "typenum"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
+
+[[package]]
+name = "umbra-indexer"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "bitvec",
+ "crc32fast",
+ "criterion",
+ "digest",
+ "flate2",
+ "hex",
+ "memmap2",
+ "parking_lot",
+ "postcard",
+ "proptest",
+ "rand 0.8.5",
+ "rmp-serde",
+ "serde",
+ "sha2",
+ "solana-poseidon",
+ "tempfile",
+]
 
 [[package]]
 name = "unarray"

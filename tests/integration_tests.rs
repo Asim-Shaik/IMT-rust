@@ -1,4 +1,4 @@
-use arcium_indexer::{
+use umbra_indexer::{
     serialization::{SerializationFormat, SerializationOptions},
     Commitment, IncrementalMerkleTree, PersistentMerkleTree, StorageConfig,
 };

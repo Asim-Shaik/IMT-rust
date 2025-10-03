@@ -1,12 +1,12 @@
-use arcium_indexer::{
+use std::time::Instant;
+use umbra_indexer::{
     serialization::{serialize_tree_optimized, SerializationFormat, SerializationOptions},
     tree::{Commitment, IncrementalMerkleTree},
     PersistentMerkleTree, StorageConfig,
 };
-use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🌳 Arcium Indexer - File-Based Merkle Tree Demo");
+    println!("🌳 Umbra Indexer - File-Based Merkle Tree Demo");
     println!("================================================\n");
 
     // Run the demo

@@ -1,8 +1,8 @@
-use arcium_indexer::tree::{
+use std::collections::HashMap;
+use umbra_indexer::tree::{
     kv_trait::AuthenticatedKV,
     sparse_merkle_tree::{smt_utils, SerializableNode, SparseMerkleTree},
 };
-use std::collections::HashMap;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Sparse Merkle Tree Inspector");

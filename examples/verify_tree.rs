@@ -1,11 +1,11 @@
-use arcium_indexer::{
+use std::fs;
+use umbra_indexer::{
     storage::{SparseTreeStorage, TreeStorage},
     tree::{
         kv_trait::AuthenticatedKV,
         sparse_merkle_tree::{smt_utils::hash_kv, SparseMerkleTree},
     },
 };
-use std::fs;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Sparse Merkle Tree Verification");

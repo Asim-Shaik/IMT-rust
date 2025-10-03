@@ -1,8 +1,8 @@
-use arcium_indexer::{
+use std::env;
+use umbra_indexer::{
     storage::{SparseTreeStorage, TreeStorage},
     tree::kv_trait::AuthenticatedKV,
 };
-use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Sparse Merkle Tree Demo");

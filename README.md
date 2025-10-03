@@ -1,6 +1,6 @@
-# Incremental Merkle Tree Implementation
+# Umbra Indexer
 
-A high-performance, persistent Incremental Merkle Tree implementation designed for blockchain indexing, privacy-preserving protocols, and applications requiring efficient data integrity verification with persistent storage.
+A persistent Merkle Tree implementation with unified storage for both incremental and sparse trees.
 
 ## 🌳 What is an Incremental Merkle Tree?
 
@@ -303,7 +303,7 @@ impl PersistentMerkleTree {
 ### Basic In-Memory Usage
 
 ```rust
-use arcium_indexer::IncrementalMerkleTree;
+use umbra_indexer::IncrementalMerkleTree;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tree = IncrementalMerkleTree::new(20);
@@ -335,7 +335,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Persistent Storage Usage
 
 ```rust
-use arcium_indexer::{PersistentMerkleTree, StorageConfig};
+use umbra_indexer::{PersistentMerkleTree, StorageConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = StorageConfig::new("./data")
@@ -361,7 +361,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Serialization Usage
 
 ```rust
-use arcium_indexer::serialization::{
+use umbra_indexer::serialization::{
     serialize_tree_optimized,
     SerializationOptions,
     SerializationFormat
