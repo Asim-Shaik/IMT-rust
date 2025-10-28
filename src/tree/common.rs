@@ -9,7 +9,7 @@ impl core::fmt::Debug for Digest {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         fmt.write_str("poseidon:")?;
         for b in self.0.iter() {
-            fmt.write_fmt(format_args!("{:02x}", b))?;
+            fmt.write_fmt(format_args!("{b:02x}"))?;
         }
         Ok(())
     }
@@ -57,7 +57,7 @@ impl<'de> Deserialize<'de> for Digest {
         }
         let mut array = [0u8; 32];
         array.copy_from_slice(&bytes);
-        Ok(Digest(array.into()))
+        Ok(Digest(array))
     }
 }
 

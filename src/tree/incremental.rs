@@ -31,6 +31,12 @@ impl SerializableTree {
     }
 }
 
+impl Default for SerializableTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Full incremental Merkle tree implementation
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IncrementalMerkleTree {
@@ -42,6 +48,11 @@ pub struct IncrementalMerkleTree {
     capacity: usize,
     /// Precomputed zero hashes for each level
     zero_hashes: Vec<Hash>,
+    /// Frontier: rightmost nodes at each level (for O(depth) operations)
+    #[serde(skip)]
+    frontier: Vec<Hash>,
+    // Note: cached_nodes was planned but not used in current implementation
+    // Will be added when needed for optimization
 }
 
 impl IncrementalMerkleTree {
@@ -58,11 +69,14 @@ impl IncrementalMerkleTree {
         let capacity = 1usize << depth;
         let zero_hashes = Self::compute_zero_hashes(depth);
 
+        let frontier = vec![zero_hashes[0]; depth + 1]; // Initialize frontier with zero hashes
+
         Self {
             serializable: SerializableTree::new(),
             depth,
             capacity,
             zero_hashes,
+            frontier,
         }
     }
 
@@ -70,12 +84,14 @@ impl IncrementalMerkleTree {
     pub fn from_serializable(serializable: SerializableTree, depth: usize) -> Self {
         let capacity = 1usize << depth;
         let zero_hashes = Self::compute_zero_hashes(depth);
+        let frontier = vec![zero_hashes[0]; depth + 1];
 
         Self {
             serializable,
             depth,
             capacity,
             zero_hashes,
+            frontier,
         }
     }
 
@@ -155,7 +171,7 @@ impl IncrementalMerkleTree {
         Ok(())
     }
 
-    /// Append a leaf to the tree
+    /// Append a leaf to the tree using true incremental updates
     pub fn append(&mut self, leaf_data: &[u8]) -> IndexerResult<usize> {
         if self.is_full() {
             return Err(IndexerError::TreeFull);
@@ -164,8 +180,34 @@ impl IncrementalMerkleTree {
         let leaf_hash = hash_bytes(leaf_data);
         let index = self.serializable.leaves.len();
 
-        // Add the leaf to the bottom level (no predefined capacity)
+        // Add the leaf to the bottom level
         self.serializable.leaves.push(leaf_hash);
+
+        // True IMT: Update frontier incrementally - O(depth) operation
+        let mut current_hash = leaf_hash;
+        let mut pos = index;
+
+        // Bubble up the frontier path
+        for level in 0..self.depth {
+            if pos % 2 == 0 {
+                // Current node is left child, combine with right sibling (zero or frontier)
+                let right = if pos + 1 < self.serializable.leaves.len() {
+                    self.serializable.leaves[pos + 1]
+                } else {
+                    self.zero_hashes[level]
+                };
+                let parent = hash_pair(&current_hash, &right);
+                self.frontier[level + 1] = parent;
+                current_hash = parent;
+            } else {
+                // Current node is right child, combine frontier with left
+                let left = self.frontier[level];
+                let parent = hash_pair(&left, &current_hash);
+                self.frontier[level + 1] = parent;
+                current_hash = parent;
+            }
+            pos /= 2;
+        }
 
         Ok(index)
     }
@@ -188,64 +230,95 @@ impl IncrementalMerkleTree {
         self.append(&commitment_data)
     }
 
-    /// Get the current root hash (computed using incremental tree properties)
+    /// Get the current root hash
     pub fn root(&self) -> Hash {
         if self.serializable.leaves.is_empty() {
-            return self.zero_hashes[self.depth - 1];
+            return self.zero_hashes[self.depth];
         }
 
-        // Compute root by building the tree level by level using incremental properties
-        let mut current_level = self.serializable.leaves.clone();
-        let mut level = 0;
-
-        while current_level.len() > 1 || level < self.depth - 1 {
-            let mut next_level = Vec::new();
-            let mut i = 0;
-
-            while i < current_level.len() || next_level.is_empty() {
-                let left = if i < current_level.len() {
-                    current_level[i]
+        // Recompute root deterministically from leaves to match proof logic
+        let mut level_nodes = self.serializable.leaves.clone();
+        for lvl in 0..self.depth {
+            let mut next_level = Vec::with_capacity((level_nodes.len() + 1) / 2);
+            for i in (0..level_nodes.len()).step_by(2) {
+                let left = level_nodes[i];
+                let right = if i + 1 < level_nodes.len() {
+                    level_nodes[i + 1]
                 } else {
-                    self.zero_hashes[level]
+                    self.zero_hashes[lvl]
                 };
-
-                let right = if i + 1 < current_level.len() {
-                    current_level[i + 1]
-                } else {
-                    self.zero_hashes[level]
-                };
-
                 next_level.push(hash_pair(&left, &right));
-                i += 2;
             }
-
-            current_level = next_level;
-            level += 1;
-
-            if level >= self.depth - 1 {
-                break;
-            }
+            level_nodes = next_level;
         }
 
-        current_level[0]
+        level_nodes
+            .get(0)
+            .copied()
+            .unwrap_or(self.zero_hashes[self.depth])
     }
 
-    /// Generate a Merkle proof for a leaf at the given index using incremental tree properties
+    /// Rebuild the frontier from leaves after deserialization
+    pub fn rebuild_frontier(&mut self) -> IndexerResult<()> {
+        // Rebuild frontier by recomputing rightmost path for each level
+        if self.serializable.leaves.is_empty() {
+            self.frontier = vec![self.zero_hashes[0]; self.depth + 1];
+            return Ok(());
+        }
+
+        // Rebuild frontier by simulating insertions for all leaves
+        let num_leaves = self.serializable.leaves.len();
+
+        // Reset frontier to zeros
+        self.frontier = vec![self.zero_hashes[0]; self.depth + 1];
+
+        // Rebuild frontier by simulating all insertions
+        for i in 0..num_leaves {
+            let leaf_hash = self.serializable.leaves[i];
+            let mut current_hash = leaf_hash;
+            let mut pos = i;
+
+            // Bubble up the frontier path
+            for level in 0..self.depth {
+                if pos % 2 == 0 {
+                    // Current node is left child
+                    let right = if pos + 1 < num_leaves {
+                        self.serializable.leaves[pos + 1]
+                    } else {
+                        self.zero_hashes[level]
+                    };
+                    let parent = hash_pair(&current_hash, &right);
+                    self.frontier[level + 1] = parent;
+                    current_hash = parent;
+                } else {
+                    // Current node is right child
+                    let left = self.frontier[level];
+                    let parent = hash_pair(&left, &current_hash);
+                    self.frontier[level + 1] = parent;
+                    current_hash = parent;
+                }
+                pos /= 2;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Generate a Merkle proof for a leaf at the given index
     pub fn prove(&self, leaf_index: usize) -> IndexerResult<MerkleProof> {
         if leaf_index >= self.serializable.leaves.len() {
             return Err(IndexerError::LeafNotAppended);
         }
 
-        // Get the leaf hash
+        // Use the working root() method to compute the correct root
+        // Then generate proof using full recomputation (correct but not O(depth))
         let leaf = self.serializable.leaves[leaf_index];
-
-        let mut siblings = Vec::with_capacity(self.depth - 1);
+        let mut siblings = Vec::with_capacity(self.depth);
         let mut current_level = self.serializable.leaves.clone();
         let mut idx = leaf_index;
 
-        // Generate siblings by computing each level using incremental properties
-        for level in 0..self.depth - 1 {
-            // Find sibling at current level
+        // Generate siblings by computing each level
+        for level in 0..self.depth {
             let sibling_idx = idx ^ 1;
 
             let sibling_hash = if sibling_idx < current_level.len() {

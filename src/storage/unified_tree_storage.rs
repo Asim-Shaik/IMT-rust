@@ -2,12 +2,11 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use crate::errors::{IndexerError, IndexerResult};
-use crate::tree::kv_trait::AuthenticatedKV;
-use crate::tree::{Commitment, IncrementalMerkleTree, MerkleProof, SparseMerkleTree};
+use crate::tree::{Commitment, IncrementalMerkleTree, MerkleProof};
 use crate::utils::Hash;
 
-/// Unified trait for both incremental and sparse merkle tree storage
-pub trait TreeStorage {
+/// Unified trait for incremental merkle tree storage
+pub trait TreeStorage: Send {
     /// Get the root hash of the tree
     fn root(&self) -> Hash;
 
@@ -47,7 +46,6 @@ pub struct TreeStats {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TreeType {
     Incremental,
-    Sparse,
 }
 
 /// Unified storage for incremental merkle trees
@@ -97,9 +95,15 @@ impl IncrementalTreeStorage {
 
         // Try bincode deserialization first
         match deserialize::<IncrementalMerkleTree>(&data) {
-            Ok(tree) => Ok(tree),
+            Ok(mut tree) => {
+                // Rebuild frontier after deserialization (it's marked with #[serde(skip)])
+                tree.rebuild_frontier().map_err(|e| {
+                    IndexerError::StorageError(format!("Failed to rebuild frontier: {}", e))
+                })?;
+                Ok(tree)
+            }
             Err(e) => {
-                eprintln!("Failed to deserialize incremental tree: {}", e);
+                eprintln!("Failed to deserialize incremental tree: {e}");
                 // If bincode fails, create a new tree
                 Ok(IncrementalMerkleTree::with_depth(depth))
             }
@@ -188,174 +192,10 @@ impl TreeStorage for IncrementalTreeStorage {
     }
 }
 
-/// Unified storage for sparse merkle trees
-pub struct SparseTreeStorage {
-    tree: Arc<RwLock<SparseMerkleTree>>,
-    data_path: std::path::PathBuf,
-    metadata_path: std::path::PathBuf,
-}
-
-impl SparseTreeStorage {
-    /// Create or open a sparse tree storage
-    pub fn new<P: AsRef<Path>>(data_dir: P, depth: Option<usize>) -> IndexerResult<Self> {
-        let data_dir = data_dir.as_ref();
-        std::fs::create_dir_all(data_dir)?;
-
-        let data_path = data_dir.join("sparse_tree.dat");
-        let metadata_path = data_dir.join("sparse_tree_metadata.dat");
-
-        // Try to load existing tree, otherwise create new one
-        let tree = if data_path.exists() {
-            Self::load_tree(&data_path, depth.unwrap_or(crate::tree::DEFAULT_TREE_DEPTH))?
-        } else {
-            SparseMerkleTree::with_depth(depth.unwrap_or(crate::tree::DEFAULT_TREE_DEPTH))
-        };
-
-        Ok(Self {
-            tree: Arc::new(RwLock::new(tree)),
-            data_path,
-            metadata_path,
-        })
-    }
-
-    /// Load a tree from disk
-    fn load_tree(path: &Path, depth: usize) -> IndexerResult<SparseMerkleTree> {
-        use bincode::deserialize;
-        use std::fs::File;
-        use std::io::{BufReader, Read};
-
-        let file = File::open(path)?;
-        let mut reader = BufReader::new(file);
-        let mut data = Vec::new();
-        reader.read_to_end(&mut data)?;
-
-        if data.is_empty() {
-            return Ok(SparseMerkleTree::with_depth(depth));
-        }
-
-        // Try bincode deserialization first
-        match deserialize::<SparseMerkleTree>(&data) {
-            Ok(tree) => Ok(tree),
-            Err(e) => {
-                eprintln!("Failed to deserialize sparse tree: {}", e);
-                // If bincode fails, create a new tree
-                Ok(SparseMerkleTree::with_depth(depth))
-            }
-        }
-    }
-
-    /// Save the tree to disk
-    fn save_tree(&self) -> IndexerResult<()> {
-        use bincode::serialize;
-        use std::fs::OpenOptions;
-        use std::io::{BufWriter, Write};
-
-        let tree = self.tree.read().unwrap();
-        let data = serialize(&*tree)?;
-
-        // Write tree data
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&self.data_path)?;
-        let mut writer = BufWriter::new(file);
-        writer.write_all(&data)?;
-        writer.flush()?;
-
-        // Write metadata (root digest)
-        let metadata = SparseTreeMetadata {
-            root_digest: tree.root_digest.as_ref().try_into().unwrap(),
-            version: 1,
-        };
-        let metadata_data = serialize(&metadata)?;
-        let metadata_file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&self.metadata_path)?;
-        let mut metadata_writer = BufWriter::new(metadata_file);
-        metadata_writer.write_all(&metadata_data)?;
-        metadata_writer.flush()?;
-
-        Ok(())
-    }
-
-    /// Insert a key-value pair (sparse tree specific)
-    pub fn insert(&self, key: String, value: String) -> IndexerResult<()> {
-        let mut tree = self.tree.write().unwrap();
-        *tree = tree.clone().insert(key, value);
-        Ok(())
-    }
-
-    /// Get a value by key (sparse tree specific)
-    pub fn get(
-        &self,
-        key: String,
-    ) -> IndexerResult<(Option<String>, Vec<crate::tree::common::Digest>)> {
-        let tree = self.tree.read().unwrap();
-        let (value, proof) = tree.get(key);
-        Ok((value, proof.sibling_hashes))
-    }
-}
-
-impl TreeStorage for SparseTreeStorage {
-    fn root(&self) -> Hash {
-        let tree = self.tree.read().unwrap();
-        let digest = tree.root_digest;
-        digest.as_ref().try_into().unwrap()
-    }
-
-    fn len(&self) -> usize {
-        // For sparse trees, we don't have a direct length, so we estimate based on tree structure
-        // This is a simplified implementation
-        1024 // Placeholder - implement proper size estimation if needed
-    }
-
-    fn insert_commitment(&mut self, commitment: &Commitment) -> IndexerResult<()> {
-        let mut tree = self.tree.write().unwrap();
-        tree.insert_commitment(commitment)?;
-        Ok(())
-    }
-
-    fn get_commitment(&self, commitment_index: u64) -> IndexerResult<Option<Commitment>> {
-        let tree = self.tree.read().unwrap();
-        tree.get_commitment(commitment_index)
-    }
-
-    fn prove(&self, _index: usize) -> IndexerResult<MerkleProof> {
-        // For sparse trees, we need to get the commitment first and then generate a proof
-        // This is a simplified implementation
-        Err(IndexerError::NotImplemented(
-            "Proof generation not yet implemented for sparse trees".to_string(),
-        ))
-    }
-
-    fn save(&self) -> IndexerResult<()> {
-        self.save_tree()
-    }
-
-    fn stats(&self) -> TreeStats {
-        let tree = self.tree.read().unwrap();
-        TreeStats {
-            root_hash: tree.root_digest.as_ref().try_into().unwrap(),
-            tree_size: self.len(),
-            tree_type: TreeType::Sparse,
-        }
-    }
-}
-
 /// Metadata for incremental trees
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct IncrementalTreeMetadata {
     pub root_hash: Hash,
-    pub version: u32,
-}
-
-/// Metadata for sparse trees
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct SparseTreeMetadata {
-    pub root_digest: [u8; 32],
     pub version: u32,
 }
 
@@ -368,10 +208,6 @@ pub fn create_tree_storage<P: AsRef<Path>>(
     match tree_type {
         TreeType::Incremental => {
             let storage = IncrementalTreeStorage::new(data_dir, depth)?;
-            Ok(Box::new(storage))
-        }
-        TreeType::Sparse => {
-            let storage = SparseTreeStorage::new(data_dir, depth)?;
             Ok(Box::new(storage))
         }
     }

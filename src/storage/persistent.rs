@@ -51,6 +51,7 @@ impl PersistentMerkleTree {
         let data_file = Arc::new(Mutex::new(
             OpenOptions::new()
                 .create(true)
+                .truncate(false)
                 .read(true)
                 .write(true)
                 .open(&data_path)?,
@@ -59,6 +60,7 @@ impl PersistentMerkleTree {
         let metadata_file = Arc::new(Mutex::new(
             OpenOptions::new()
                 .create(true)
+                .truncate(false)
                 .read(true)
                 .write(true)
                 .open(&metadata_path)?,
@@ -327,7 +329,7 @@ impl PersistentMerkleTree {
                 let page_start = page_id * PAGE_SIZE;
                 let leaf_start = page_start + page_offset * (LEAF_SIZE + 1);
 
-                if leaf_start + LEAF_SIZE + 1 <= mmap.len() && mmap[leaf_start] == 1 {
+                if leaf_start + LEAF_SIZE < mmap.len() && mmap[leaf_start] == 1 {
                     let mut hash = [0u8; 32];
                     hash.copy_from_slice(&mmap[leaf_start + 1..leaf_start + 1 + LEAF_SIZE]);
                     return Ok(Some(hash));
@@ -349,7 +351,7 @@ impl PersistentMerkleTree {
         let page_data = page.read();
         let leaf_start = page_offset * (LEAF_SIZE + 1);
 
-        if leaf_start + LEAF_SIZE + 1 <= page_data.len() && page_data[leaf_start] == 1 {
+        if leaf_start + LEAF_SIZE < page_data.len() && page_data[leaf_start] == 1 {
             let mut hash = [0u8; 32];
             hash.copy_from_slice(&page_data[leaf_start + 1..leaf_start + 1 + LEAF_SIZE]);
             Ok(Some(hash))

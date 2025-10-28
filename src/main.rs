@@ -1,188 +1,195 @@
-use std::time::Instant;
-use umbra_indexer::{
-    serialization::{serialize_tree_optimized, SerializationFormat, SerializationOptions},
-    tree::{Commitment, IncrementalMerkleTree},
-    PersistentMerkleTree, StorageConfig,
-};
+use std::env;
+use umbra_indexer::indexer::service::IndexService;
+use umbra_indexer::tree::{Commitment, IncrementalMerkleTree};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🌳 Umbra Indexer - File-Based Merkle Tree Demo");
-    println!("================================================\n");
+    // init logger
+    env_logger::builder().format_timestamp_secs().init();
 
-    // Run the demo
-    run_persistent_demo()?;
+    // Run Merkle proof example
+    run_merkle_proof_example()?;
+    println!("🌳 Umbra Indexer - Starting...");
+    println!("================================\n");
 
-    println!("\n{}", "=".repeat(50));
+    // Read configuration from environment variables
+    let data_dir = env::var("INDEXER_DATA_DIR").unwrap_or_else(|_| "./data".to_string());
+    let depth = env::var("INDEXER_TREE_DEPTH")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok());
+    let laserstream_endpoint = env::var("LASERSTREAM_ENDPOINT")
+        .unwrap_or_else(|_| "https://laserstream-mainnet-tyo.helius-rpc.com".to_string());
+    let laserstream_api_key =
+        env::var("LASERSTREAM_API_KEY").unwrap_or_else(|_| "your-api-key".to_string());
+    let program_ids: Vec<String> = env::var("PROGRAM_IDS")
+        .unwrap_or_else(|_| "YourProgram111111111111111111111111111111111".to_string())
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .collect();
 
-    run_serialization_demo()?;
+    // Print configuration
+    println!("📋 Configuration:");
+    println!("   Data Directory: {data_dir}");
+    println!("   Tree Depth: {:?}", depth.unwrap_or(20));
+    println!("   Laserstream Endpoint: {laserstream_endpoint}");
+    println!(
+        "   Laserstream API Key: {}",
+        if laserstream_api_key.len() > 10 {
+            format!("{}...", &laserstream_api_key[..10])
+        } else {
+            "***".to_string()
+        }
+    );
+    println!("   Program IDs: {program_ids:?}");
+    println!();
 
-    println!("\n🎉 Demo completed successfully!");
-    println!("💡 Check the './demo_data' directory to see persisted files");
+    // Initialize tree (will load existing or create new)
+    println!("🌳 Initializing Merkle tree...");
+    println!("   Directory: {data_dir}");
+
+    // Create serializer registry
+    let registry = umbra_indexer::indexer::serializers::SerializerRegistry::new();
+
+    println!("✅ Tree ready (will load if exists, or create new)\n");
+
+    // Start the indexer service
+    println!("🚀 Starting indexer...");
+    println!("   Connecting to Laserstream...\n");
+
+    // Run the async indexer service
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        let service = IndexService::new(
+            &data_dir,
+            depth,
+            laserstream_endpoint,
+            laserstream_api_key,
+            program_ids,
+            registry,
+        )?;
+
+        println!("✅ Connected! Listening for transactions...\n");
+        service.run().await
+    })?;
 
     Ok(())
 }
 
-fn run_persistent_demo() -> Result<(), Box<dyn std::error::Error>> {
-    println!("📁 Persistent Storage Demo");
-    println!("{}", "-".repeat(30));
+fn run_merkle_proof_example() -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n═══════════════════════════════════════════════════════════════");
+    println!("🔬 MERKLE PROOF GENERATION EXAMPLE");
+    println!("═══════════════════════════════════════════════════════════════\n");
 
-    // Create storage configuration
-    let config = StorageConfig::new("./demo_data")
-        .with_cache_size(512 * 1024) // 512KB cache
-        .with_compression(true)
-        .with_wal(true);
+    // Create tree with depth 3 (for easy visualization)
+    let mut tree = IncrementalMerkleTree::new(3);
+    println!(
+        "Tree created with depth=3, capacity=2^3={}\n",
+        tree.capacity()
+    );
 
-    println!("Config: {:?}", config);
-
-    // Create or open persistent tree
-    println!("\n🔧 Creating/Opening persistent Merkle tree...");
-    let start = Instant::now();
-    let mut tree = PersistentMerkleTree::new(config)?;
-    println!("✅ Tree initialized in {:?}", start.elapsed());
-
-    // Show initial state
-    println!("\n📊 Initial tree state:");
-    println!("   Length: {} leaves", tree.len());
-    println!("   Root: {}", hex::encode(tree.root()));
-    if let Some(zero_hash) = tree.zero_hash(0) {
-        println!("   Zero hash (level 0): {}", hex::encode(zero_hash));
-    }
-
-    // Add some commitments
-    println!("\n📝 Adding commitments to the tree...");
+    // Insert 5 commitments (indices 0-4)
+    println!("Inserting 5 commitments...");
     let commitments = [
-        "Alice's commitment to secret value 123",
-        "Bob's commitment to secret value 456",
-        "Charlie's commitment to secret value 789",
+        Commitment::new(1, 0, [0u8; 32], [1u8; 32], [2u8; 32]),
+        Commitment::new(1, 1, [10u8; 32], [11u8; 32], [12u8; 32]),
+        Commitment::new(1, 2, [20u8; 32], [21u8; 32], [22u8; 32]),
+        Commitment::new(1, 3, [30u8; 32], [31u8; 32], [32u8; 32]),
+        Commitment::new(1, 4, [40u8; 32], [41u8; 32], [42u8; 32]),
     ];
 
-    let mut indices = Vec::new();
     for (i, commitment) in commitments.iter().enumerate() {
-        let start = Instant::now();
-        let index = tree.append(commitment.as_bytes())?;
-        let duration = start.elapsed();
-
-        indices.push(index);
+        let index = tree.insert_commitment(commitment)?;
         println!(
-            "   [{}] Added: '{}' (took {:?})",
-            index, commitment, duration
-        );
-    }
-
-    // Show updated state
-    println!("\n📊 Updated tree state:");
-    println!("   Length: {} leaves", tree.len());
-    println!("   Root: {}", hex::encode(tree.root()));
-
-    // Generate proofs
-    println!("\n🔍 Generating Merkle proofs...");
-    for &index in &indices {
-        let start = Instant::now();
-        let proof = tree.prove(index)?;
-        let duration = start.elapsed();
-
-        println!(
-            "   Proof for leaf {}: {} siblings (generated in {:?})",
+            "  Inserted commitment {} at index {} (root: {})",
+            i,
             index,
-            proof.siblings.len(),
-            duration
+            hex::encode(tree.root())
+                .chars()
+                .take(16)
+                .collect::<String>()
         );
+    }
 
-        // Verify the proof
-        let is_valid = proof.verify(&tree.root());
+    println!("\nTree state:");
+    println!("  Leaves: {} (indices 0-4)", tree.len());
+    println!("  Root: {}", hex::encode(tree.root()));
+
+    // Generate proof for index 2
+    println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("Generating proof for leaf at index 2...\n");
+
+    let proof = tree.prove(2)?;
+
+    println!("Proof generated:");
+    println!("  Leaf index: {}", proof.leaf_index);
+    println!("  Leaf hash: {}", hex::encode(proof.leaf));
+    println!("  Number of siblings: {}", proof.siblings.len());
+
+    println!("\nSiblings at each level:");
+    for (level, sibling) in proof.siblings.iter().enumerate() {
         println!(
-            "     Verification: {}",
-            if is_valid { "✅ VALID" } else { "❌ INVALID" }
+            "  Level {}: {}",
+            level,
+            hex::encode(sibling).chars().take(16).collect::<String>()
         );
     }
 
-    // Sync to disk
-    println!("\n💾 Syncing to disk...");
-    let start = Instant::now();
-    tree.sync()?;
-    let duration = start.elapsed();
-    println!("   Sync completed in {:?}", duration);
+    // Save proof to file as JSON
+    let proof_file = "merkle_proof.json";
+    let proof_json = serde_json::json!({
+        "leaf_index": proof.leaf_index,
+        "leaf": hex::encode(proof.leaf),
+        "siblings": proof.siblings.iter().map(|s| hex::encode(s)).collect::<Vec<_>>(),
+        "sibling_count": proof.siblings.len()
+    });
+    std::fs::write(proof_file, serde_json::to_string_pretty(&proof_json)?)?;
+    println!("\n  Proof saved to: {}", proof_file);
+    println!("  Format: JSON");
 
-    Ok(())
-}
+    // Verify the proof
+    println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("Verifying proof...\n");
 
-fn run_serialization_demo() -> Result<(), Box<dyn std::error::Error>> {
-    println!("📦 Serialization Demo");
-    println!("{}", "-".repeat(20));
+    let current_root = tree.root();
+    println!("  Current root: {}", hex::encode(current_root));
 
-    // Create a test tree
-    let mut tree = IncrementalMerkleTree::new(20);
-    let test_data = [
-        "commitment_1",
-        "commitment_2",
-        "commitment_3",
-        "commitment_4",
-        "commitment_5",
-    ];
-
-    for data in &test_data {
-        tree.append(data.as_bytes())?;
-    }
-
-    // Test different serialization formats
-    println!("\n🔄 Testing serialization formats:");
-    let formats = [
-        ("Bincode", SerializationFormat::Bincode),
-        ("MessagePack", SerializationFormat::MessagePack),
-        ("Postcard", SerializationFormat::Postcard),
-    ];
-
-    for (name, format) in &formats {
-        let options_uncompressed = SerializationOptions::new(format.clone(), false, 0);
-        let options_compressed = SerializationOptions::new(format.clone(), true, 6);
-
-        let uncompressed = serialize_tree_optimized(&tree, &options_uncompressed)?;
-        let compressed = serialize_tree_optimized(&tree, &options_compressed)?;
-
-        println!(
-            "   {}: {} bytes (uncompressed), {} bytes (compressed)",
-            name,
-            uncompressed.len(),
-            compressed.len()
-        );
-    }
-
-    // Test basic serialization
-    println!("\n🔄 Testing tree serialization:");
-    let mut test_tree = IncrementalMerkleTree::new(20);
-    test_tree.append(b"test1")?;
-    test_tree.append(b"test2")?;
-    test_tree.append(b"test3")?;
-
-    let original_root = test_tree.root();
-    let serialized = bincode::serialize(&test_tree)?;
-    let deserialized: IncrementalMerkleTree = bincode::deserialize(&serialized)?;
-
-    println!("   Original root: {}", hex::encode(original_root));
-    println!("   Deserialized root: {}", hex::encode(deserialized.root()));
+    let is_valid = proof.verify(&current_root);
     println!(
-        "   Serialization successful: {}",
-        original_root == deserialized.root()
+        "  Verification result: {}",
+        if is_valid { "✅ VALID" } else { "❌ INVALID" }
     );
 
-    Ok(())
-}
+    if !is_valid {
+        // Manual verification debug
+        println!("\n  Debugging proof verification:");
+        println!("    Leaf: {}", hex::encode(proof.leaf));
+        println!("    Leaf index: {}", proof.leaf_index);
+        let mut computed = proof.leaf;
+        let mut idx = proof.leaf_index;
+        for (i, sibling) in proof.siblings.iter().enumerate() {
+            println!(
+                "    Level {}: sibling = {}",
+                i,
+                hex::encode(sibling).chars().take(16).collect::<String>()
+            );
+            if idx % 2 == 0 {
+                computed = umbra_indexer::utils::internal::hash_pair(&computed, sibling);
+            } else {
+                computed = umbra_indexer::utils::internal::hash_pair(sibling, &computed);
+            }
+            println!(
+                "      Computed: {}",
+                hex::encode(computed).chars().take(16).collect::<String>()
+            );
+            idx /= 2;
+        }
+        println!("    Final computed root: {}", hex::encode(computed));
+    }
 
-fn _test_commitment_parsing() -> Result<(), Box<dyn std::error::Error>> {
-    println!("\n🔍 Testing commitment parsing:");
+    // Display JSON content
+    let json_str = std::fs::read_to_string(proof_file)?;
+    println!("\nJSON content:");
+    println!("{}", json_str);
 
-    let commitment = Commitment::new(1, 42, [1u8; 32], [2u8; 32], [3u8; 32]);
-    let serialized = commitment.to_bytes();
-    let parsed = Commitment::from_bytes(&serialized)?;
-
-    println!("   Original: {:?}", commitment);
-    println!("   Parsed:   {:?}", parsed);
-    println!(
-        "   Match: {}",
-        commitment.version == parsed.version
-            && commitment.commitment_index == parsed.commitment_index
-            && commitment.hash == parsed.hash
-    );
-
+    println!("\n═══════════════════════════════════════════════════════════════\n");
     Ok(())
 }

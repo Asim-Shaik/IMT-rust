@@ -29,12 +29,12 @@ impl fmt::Display for IndexerError {
             IndexerError::TreeFull => write!(f, "Merkle tree is at full capacity"),
             IndexerError::IndexOutOfBounds => write!(f, "Index is out of bounds"),
             IndexerError::LeafNotAppended => write!(f, "Leaf has not been appended yet"),
-            IndexerError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
-            IndexerError::IoError(err) => write!(f, "IO error: {}", err),
+            IndexerError::SerializationError(msg) => write!(f, "Serialization error: {msg}"),
+            IndexerError::IoError(err) => write!(f, "IO error: {err}"),
             IndexerError::ChecksumError => write!(f, "Checksum verification failed"),
-            IndexerError::InvalidData(msg) => write!(f, "Invalid data: {}", msg),
-            IndexerError::StorageError(msg) => write!(f, "Storage error: {}", msg),
-            IndexerError::NotImplemented(msg) => write!(f, "Feature not implemented: {}", msg),
+            IndexerError::InvalidData(msg) => write!(f, "Invalid data: {msg}"),
+            IndexerError::StorageError(msg) => write!(f, "Storage error: {msg}"),
+            IndexerError::NotImplemented(msg) => write!(f, "Feature not implemented: {msg}"),
         }
     }
 }
@@ -61,7 +61,7 @@ impl From<Box<dyn std::error::Error>> for IndexerError {
 
 impl From<hex::FromHexError> for IndexerError {
     fn from(err: hex::FromHexError) -> Self {
-        IndexerError::InvalidData(format!("Hex decoding error: {}", err))
+        IndexerError::InvalidData(format!("Hex decoding error: {err}"))
     }
 }
 

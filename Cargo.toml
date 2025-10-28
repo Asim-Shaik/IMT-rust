@@ -36,3 +36,51 @@ rand = "0.8"
 [dev-dependencies]
 criterion = "0.5"
 proptest = "1.0"
+
+# Solana & Indexer dependencies
+[dependencies.solana-sdk]
+version = "2.0"
+default-features = false
+features = ["full"]
+
+[features]
+default = []
+
+[dependencies.tokio]
+version = "1.0"
+features = ["full"]
+
+[dependencies.tungstenite]
+version = "0.23"
+default-features = true
+
+[dependencies.serde_json]
+version = "1.0"
+
+[dependencies.url]
+version = "2.5"
+
+[dependencies.borsh]
+version = "1.5.7"
+
+[dependencies.anyhow]
+version = "1.0"
+
+[dependencies.tokio-tungstenite]
+version = "0.24"
+features = ["native-tls"]
+
+[dependencies.base64]
+version = "0.22"
+
+[dependencies.futures-util]
+version = "0.3"
+
+[dependencies.log]
+version = "0.4"
+
+[dependencies.env_logger]
+version = "0.11"
+
+[dependencies.helius-laserstream]
+version = "0.0.9"

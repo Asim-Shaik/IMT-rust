@@ -35,33 +35,8 @@ fn main() -> IndexerResult<()> {
     incremental_storage.save()?;
     println!("   - Saved to disk");
 
-    // Demo 2: Sparse Tree Storage
-    println!("\n2. Testing Sparse Tree Storage:");
-    let mut sparse_storage = create_tree_storage(TreeType::Sparse, &temp_dir, Some(20))?;
-
-    // Insert the same commitments
-    sparse_storage.insert_commitment(&commitment1)?;
-    sparse_storage.insert_commitment(&commitment2)?;
-
-    println!("   - Inserted 2 commitments");
-    println!("   - Tree length: {}", sparse_storage.len());
-    println!("   - Root hash: {}", hex::encode(sparse_storage.root()));
-
-    // Retrieve commitment from sparse tree
-    let retrieved_commitment = sparse_storage.get_commitment(0)?;
-    if let Some(comm) = retrieved_commitment {
-        println!(
-            "   - Retrieved commitment 0: version={}, index={}",
-            comm.version, comm.commitment_index
-        );
-    }
-
-    // Save to disk
-    sparse_storage.save()?;
-    println!("   - Saved to disk");
-
-    // Demo 3: Plug-and-play usage
-    println!("\n3. Testing Plug-and-Play Usage:");
+    // Demo 2: Plug-and-play usage
+    println!("\n2. Testing Plug-and-Play Usage:");
 
     // Function that works with any tree storage
     fn process_tree_storage(storage: &mut dyn TreeStorage, tree_name: &str) -> IndexerResult<()> {
@@ -81,27 +56,19 @@ fn main() -> IndexerResult<()> {
         Ok(())
     }
 
-    // Use the same function with both tree types
+    // Use the function with incremental tree
     let mut incremental_storage2 = create_tree_storage(TreeType::Incremental, &temp_dir, Some(20))?;
-    let mut sparse_storage2 = create_tree_storage(TreeType::Sparse, &temp_dir, Some(20))?;
 
     process_tree_storage(&mut *incremental_storage2, "Incremental")?;
-    process_tree_storage(&mut *sparse_storage2, "Sparse")?;
 
-    // Demo 4: Statistics comparison
-    println!("\n4. Tree Statistics Comparison:");
+    // Demo 3: Statistics
+    println!("\n3. Tree Statistics (Final State):");
     let incremental_stats = incremental_storage.stats();
-    let sparse_stats = sparse_storage.stats();
 
-    println!("   Incremental Tree:");
+    println!("   Tree Statistics:");
     println!("     - Type: {:?}", incremental_stats.tree_type);
     println!("     - Size: {}", incremental_stats.tree_size);
     println!("     - Root: {}", hex::encode(incremental_stats.root_hash));
-
-    println!("   Sparse Tree:");
-    println!("     - Type: {:?}", sparse_stats.tree_type);
-    println!("     - Size: {}", sparse_stats.tree_size);
-    println!("     - Root: {}", hex::encode(sparse_stats.root_hash));
 
     println!("\n=== Demo Complete ===");
     Ok(())
